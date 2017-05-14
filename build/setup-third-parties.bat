@@ -1,0 +1,1 @@
+python setup-third-parties.py
