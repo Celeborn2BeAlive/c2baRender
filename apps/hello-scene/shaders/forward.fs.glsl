@@ -8,5 +8,5 @@ out vec3 fColor;
 
 void main()
 {
-   fColor = vec3(vTexCoords, 0);
+   fColor = vec3(dot(normalize(vViewSpaceNormal), normalize(-vViewSpacePosition)));
 }

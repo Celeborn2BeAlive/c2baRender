@@ -94,5 +94,8 @@ bool ViewController::update(float elapsedTime)
         setViewMatrix(lookAt(position, position + frontVector, upVector));
     }
 
+    if (glfwGetMouseButton(m_pWindow, GLFW_MOUSE_BUTTON_LEFT))
+        hasMoved = true;
+
     return hasMoved;
 }
