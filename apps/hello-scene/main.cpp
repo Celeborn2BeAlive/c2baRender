@@ -5,6 +5,7 @@
 #include <mutex>
 #include <atomic>
 #include <deque>
+#include <tuple>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -18,6 +19,7 @@
 
 #include <embree2/rtcore_builder.h>
 #include <embree2/rtcore.h>
+#include <embree2/rtcore_ray.h>
 
 #include "imgui_impl_glfw_gl3.hpp"
 #include "GLProgram.hpp"
@@ -55,16 +57,21 @@ struct SceneGeometry
 {
     std::vector<TriangleMesh::Vertex> m_Vertices;
     std::vector<TriangleMesh::Triangle> m_Triangles;
+    std::vector<std::tuple<size_t, size_t, size_t>> m_Meshes; // List of pairs (offset, triangle count, vertex count)
 
     void append(const TriangleMesh & mesh)
     {
         const auto offset = m_Vertices.size();
         m_Vertices.insert(end(m_Vertices), begin(mesh.m_Vertices), end(mesh.m_Vertices));
 
+        const auto triangleOffset = m_Triangles.size();
+
         for (const auto & triangle : mesh.m_Triangles)
         {
             m_Triangles.emplace_back(offset + triangle.v0, offset + triangle.v1, offset + triangle.v2);
         }
+
+        m_Meshes.emplace_back(triangleOffset, mesh.m_Triangles.size(), mesh.m_Vertices.size());
     }
 
     size_t getMaterialCount()
@@ -86,7 +93,24 @@ SceneGeometry loadModel(const std::string& filepath);
 
 struct RTScene
 {
+    RTCScene m_rtcScene;
 
+    RTScene(const RTCDevice & device, const SceneGeometry & geometry): m_rtcScene { rtcDeviceNewScene(device, RTC_SCENE_STATIC, RTC_INTERSECT1) }
+    {
+        for (size_t i = 0; i < geometry.m_Meshes.size(); ++i)
+        {
+            const auto geomId = rtcNewTriangleMesh2(m_rtcScene, RTC_GEOMETRY_STATIC, std::get<1>(geometry.m_Meshes[i]), geometry.m_Vertices.size());
+            rtcSetBuffer2(m_rtcScene, geomId, RTC_VERTEX_BUFFER, geometry.m_Vertices.data(), 0, sizeof(TriangleMesh::Vertex), geometry.m_Vertices.size());
+            rtcSetBuffer2(m_rtcScene, geomId, RTC_INDEX_BUFFER, geometry.m_Triangles.data(), sizeof(TriangleMesh::Triangle) * std::get<0>(geometry.m_Meshes[i]), 
+                sizeof(TriangleMesh::Triangle), std::get<1>(geometry.m_Meshes[i]));
+        }
+        rtcCommit(m_rtcScene);
+    }
+
+    ~RTScene()
+    {
+        rtcDeleteScene(m_rtcScene);
+    }
 };
 
 glm::vec3 getColor(size_t n) {
@@ -103,7 +127,8 @@ class TileRenderer
 public:
     TileRenderer()
     {
-        for (size_t threadId = 0; threadId < std::thread::hardware_concurrency(); ++threadId) {
+        const auto threadCount = 1;// std::thread::hardware_concurrency();
+        for (size_t threadId = 0; threadId < threadCount; ++threadId) {
             m_ThreadPool.emplace_back([this, threadId]()
             {
                 renderTask(threadId);
@@ -152,12 +177,16 @@ public:
     void clear()
     {
         fill(begin(m_Framebuffer), end(m_Framebuffer), glm::vec4(0));
+        std::unique_lock<std::mutex> l{ m_RenderedTilesMutex };
+        m_RenderedTiles.clear();
         m_Dirty = false;
+        m_NextTile = 0;
     }
 
     void render()
     {
         if (m_Dirty) {
+            m_bRunning = false;
             clear();
         }
 
@@ -166,39 +195,49 @@ public:
             m_bRunning = true;
         }
 
-        if (m_RenderedTiles.size() > (m_MaxTileCountInPool / 2))
         {
             std::unique_lock<std::mutex> l{ m_RenderedTilesMutex };
-            for (const auto & tile : m_RenderedTiles)
+            if (true || m_RenderedTiles.size() > (m_MaxTileCountInPool / 2))
             {
-                const auto tileX = tile.m_Index % m_TileCountX;
-                const auto tileY = tile.m_Index / m_TileCountX;
-
-                for (size_t tilePixelY = 0; tilePixelY < m_TileSize; ++tilePixelY)
+                for (const auto & tile : m_RenderedTiles)
                 {
-                    for (size_t tilePixelX = 0; tilePixelX < m_TileSize; ++tilePixelX)
+                    const auto tileX = tile.m_Index % m_TileCountX;
+                    const auto tileY = tile.m_Index / m_TileCountX;
+
+                    size_t beginX = tileX * m_TileSize;
+                    size_t endX = std::min((tileX + 1) * m_TileSize, m_Width - 1);
+
+                    size_t beginY = tileY * m_TileSize;
+                    size_t endY = std::min((tileY + 1) * m_TileSize, m_Height - 1);
+
+                    size_t countX = endX - beginX + 1;
+                    size_t countY = endY - beginY + 1;
+
+                    for (size_t pixelY = 0; pixelY < countY; ++pixelY)
                     {
-                        const auto pixelX = tilePixelX + tileX * m_TileSize;
-                        const auto pixelY = tilePixelY + tileY * m_TileSize;
+                        for (size_t pixelX = 0; pixelX < countX; ++pixelX)
+                        {
+                            const auto globalPixelX = beginX + pixelX;
+                            const auto globalPixelY = beginY + pixelY;
 
-                        if (pixelX >= m_Width || pixelY >= m_Height) {
-                            continue;
+                            const auto tilePixelId = pixelX + pixelY * m_TileSize;
+                            const auto globalPixelId = globalPixelX + globalPixelY * m_Width;
+
+                            const glm::vec2 rasterPos = glm::vec2(globalPixelX + 0.5f, globalPixelY + 0.5f);
+                            const glm::vec2 ndcPos = glm::vec2(-1) + 2.f * glm::vec2(rasterPos / glm::vec2(m_Width, m_Height));
+
+                            m_Framebuffer[globalPixelId] += tile.m_pData[tilePixelId];
                         }
+                    }
 
-                        const auto tilePixelId = tilePixelX + tilePixelY * m_TileSize;
-                        const auto pixelId = pixelX + pixelY * m_Width;
-
-                        m_Framebuffer[pixelId] += tile.m_pData[tilePixelId];
+                    {
+                        std::unique_lock<std::mutex> l(m_FreeTilesMutex);
+                        m_FreeTiles.emplace_back(tile.m_pData);
+                        m_FreeTilesCondition.notify_all();
                     }
                 }
-
-                {
-                    std::unique_lock<std::mutex> l(m_FreeTilesMutex);
-                    m_FreeTiles.emplace_back(tile.m_pData);
-                    m_FreeTilesCondition.notify_all();
-                }
+                m_RenderedTiles.clear();
             }
-            m_RenderedTiles.clear();
         }
     }
 
@@ -252,18 +291,64 @@ private:
                 m_FreeTiles.pop_back();
             }
 
-            for (size_t pixelY = 0; pixelY < m_TileSize; ++pixelY)
+            size_t tileX = tileId % m_TileCountX;
+            size_t tileY = tileId / m_TileCountX;
+
+            size_t beginX = tileX * m_TileSize;
+            size_t endX = std::min((tileX + 1) * m_TileSize, m_Width - 1);
+
+            size_t beginY = tileY * m_TileSize;
+            size_t endY = std::min((tileY + 1) * m_TileSize, m_Height - 1);
+
+            size_t countX = endX - beginX + 1;
+            size_t countY = endY - beginY + 1;
+
+            for (size_t pixelY = 0; pixelY < countY; ++pixelY)
             {
-                for (size_t pixelX = 0; pixelX < m_TileSize; ++pixelX)
+                for (size_t pixelX = 0; pixelX < countX; ++pixelX)
                 {
                     const size_t pixelId = pixelX + pixelY * m_TileSize;
-                    tilePtr[pixelId] = glm::vec4(getColor(threadId), 1);
+
+                    const glm::vec2 rasterPos = glm::vec2(beginX + pixelX + 0.5f, beginY + pixelY + 0.5f);
+                    const glm::vec2 ndcPos = glm::vec2(-1) + 2.f * glm::vec2(rasterPos / glm::vec2(m_Width, m_Height));
+
+                    glm::vec4 viewSpacePos = m_RcpProjMatrix * glm::vec4(ndcPos, -1.f, 1.f);
+                    viewSpacePos /= viewSpacePos.w;
+
+                    glm::vec4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
+                    worldSpacePos /= worldSpacePos.w;
+
+                    RTCRay ray;
+                    ray.org[0] = m_RcpViewMatrix[3][0];
+                    ray.org[1] = m_RcpViewMatrix[3][1];
+                    ray.org[2] = m_RcpViewMatrix[3][2];
+
+                    ray.dir[0] = worldSpacePos[0] - ray.org[0];
+                    ray.dir[1] = worldSpacePos[1] - ray.org[1];
+                    ray.dir[2] = worldSpacePos[2] - ray.org[2];
+
+                    ray.tnear = 0.f;
+                    ray.tfar = std::numeric_limits<float>::infinity();
+                    ray.instID = RTC_INVALID_GEOMETRY_ID;
+                    ray.geomID = RTC_INVALID_GEOMETRY_ID;
+                    ray.primID = RTC_INVALID_GEOMETRY_ID;
+                    ray.mask = 0xFFFFFFFF;
+                    ray.time = 0.0f;
+
+                    rtcIntersect(m_Scene->m_rtcScene, ray);
+
+                    if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
+                        tilePtr[pixelId] = glm::vec4(ray.Ng[0], ray.Ng[1], ray.Ng[2], 1);
+                    else
+                        tilePtr[pixelId] = glm::vec4(glm::vec3(0), 1);
                 }
             }
 
             if (m_bDone) {
                 break;
             }
+
+            std::this_thread::sleep_for(std::chrono::seconds(1));
 
             {
                 std::unique_lock<std::mutex> l{ m_RenderedTilesMutex };
@@ -282,8 +367,8 @@ private:
     size_t m_Width;
     size_t m_Height;
 
-    glm::mat4 m_RcpProjMatrix;
-    glm::mat4 m_RcpViewMatrix;
+    glm::mat4 m_RcpProjMatrix; // Screen to Cam
+    glm::mat4 m_RcpViewMatrix; // Cam to World
     
     static const size_t m_MaxTileCountInPool = 256;
     std::vector<glm::vec4> m_TileMemoryPool{ m_TilePixelCount * m_MaxTileCountInPool };
@@ -305,6 +390,11 @@ private:
     std::mutex m_RenderedTilesMutex;
 };
 
+void rtcErrorCallback(void* userPtr, const RTCError code, const char * str)
+{
+    std::cerr << "Embree error: " << str << std::endl;
+}
+
 int main(int argc, char** argv)
 {
     const auto m_AppPath = fs::path{ argv[0] };
@@ -318,9 +408,11 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    const RTCDevice embreeDevice = rtcNewDevice();
-
     SceneGeometry geometry = loadModel(argv[1]);
+
+    const RTCDevice embreeDevice = rtcNewDevice();
+    rtcDeviceSetErrorFunction2(embreeDevice, rtcErrorCallback, nullptr);
+    RTScene scene(embreeDevice, geometry);
 
     if (!glfwInit()) {
         std::cerr << "Unable to init GLFW.\n";
@@ -431,6 +523,8 @@ int main(int argc, char** argv)
 
     const auto projMatrix = glm::perspective(glm::radians(70.f), float(m_nWindowWidth) / m_nWindowHeight, 0.01f * 3000.f, 3000.f);
     renderer.setProjMatrix(projMatrix);
+
+    renderer.setScene(scene);
 
     bool cameraMoved = true;
 

@@ -185,7 +185,7 @@ JSON["git_tag"] = "v" + JSON["version"]
 
 EMBREE = {}
 EMBREE["git_repo"] = "https://github.com/embree/embree"
-EMBREE["version"] = "2.15.0"
+EMBREE["version"] = "2.16.0"
 EMBREE["prefix"] = "embree"
 EMBREE["git_tag"] = "v" + EMBREE["version"]
 EMBREE["build"] = build_embree
