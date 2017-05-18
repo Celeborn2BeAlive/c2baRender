@@ -312,35 +312,37 @@ private:
                     const glm::vec2 rasterPos = glm::vec2(beginX + pixelX + 0.5f, beginY + pixelY + 0.5f);
                     const glm::vec2 ndcPos = glm::vec2(-1) + 2.f * glm::vec2(rasterPos / glm::vec2(m_Width, m_Height));
 
-                    glm::vec4 viewSpacePos = m_RcpProjMatrix * glm::vec4(ndcPos, -1.f, 1.f);
-                    viewSpacePos /= viewSpacePos.w;
+                    tilePtr[pixelId] = glm::vec4(glm::vec2(rasterPos / glm::vec2(m_Width, m_Height)), 0, 1);
 
-                    glm::vec4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
-                    worldSpacePos /= worldSpacePos.w;
+                    //glm::vec4 viewSpacePos = m_RcpProjMatrix * glm::vec4(ndcPos, -1.f, 1.f);
+                    //viewSpacePos /= viewSpacePos.w;
 
-                    RTCRay ray;
-                    ray.org[0] = m_RcpViewMatrix[3][0];
-                    ray.org[1] = m_RcpViewMatrix[3][1];
-                    ray.org[2] = m_RcpViewMatrix[3][2];
+                    //glm::vec4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
+                    //worldSpacePos /= worldSpacePos.w;
 
-                    ray.dir[0] = worldSpacePos[0] - ray.org[0];
-                    ray.dir[1] = worldSpacePos[1] - ray.org[1];
-                    ray.dir[2] = worldSpacePos[2] - ray.org[2];
+                    //RTCRay ray;
+                    //ray.org[0] = m_RcpViewMatrix[3][0];
+                    //ray.org[1] = m_RcpViewMatrix[3][1];
+                    //ray.org[2] = m_RcpViewMatrix[3][2];
 
-                    ray.tnear = 0.f;
-                    ray.tfar = std::numeric_limits<float>::infinity();
-                    ray.instID = RTC_INVALID_GEOMETRY_ID;
-                    ray.geomID = RTC_INVALID_GEOMETRY_ID;
-                    ray.primID = RTC_INVALID_GEOMETRY_ID;
-                    ray.mask = 0xFFFFFFFF;
-                    ray.time = 0.0f;
+                    //ray.dir[0] = worldSpacePos[0] - ray.org[0];
+                    //ray.dir[1] = worldSpacePos[1] - ray.org[1];
+                    //ray.dir[2] = worldSpacePos[2] - ray.org[2];
 
-                    rtcIntersect(m_Scene->m_rtcScene, ray);
+                    //ray.tnear = 0.f;
+                    //ray.tfar = std::numeric_limits<float>::infinity();
+                    //ray.instID = RTC_INVALID_GEOMETRY_ID;
+                    //ray.geomID = RTC_INVALID_GEOMETRY_ID;
+                    //ray.primID = RTC_INVALID_GEOMETRY_ID;
+                    //ray.mask = 0xFFFFFFFF;
+                    //ray.time = 0.0f;
 
-                    if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
-                        tilePtr[pixelId] = glm::vec4(ray.Ng[0], ray.Ng[1], ray.Ng[2], 1);
-                    else
-                        tilePtr[pixelId] = glm::vec4(glm::vec3(0), 1);
+                    //rtcIntersect(m_Scene->m_rtcScene, ray);
+
+                    //if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
+                    //    tilePtr[pixelId] = glm::vec4(ray.Ng[0], ray.Ng[1], ray.Ng[2], 1);
+                    //else
+                    //    tilePtr[pixelId] = glm::vec4(glm::vec3(0), 1);
                 }
             }
 
@@ -348,7 +350,7 @@ private:
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            //std::this_thread::sleep_for(std::chrono::seconds(1));
 
             {
                 std::unique_lock<std::mutex> l{ m_RenderedTilesMutex };
