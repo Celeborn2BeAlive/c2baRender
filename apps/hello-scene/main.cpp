@@ -298,7 +298,7 @@ class TileRenderer
 public:
     TileRenderer()
     {
-        const auto threadCount = std::thread::hardware_concurrency();
+        const auto threadCount = std::thread::hardware_concurrency() > 1u ? std::thread::hardware_concurrency() - 1u : 1u; // Try to keep one thread for the main loop
         for (size_t threadId = 0; threadId < threadCount; ++threadId) {
             m_ThreadPool.emplace_back([this, threadId]()
             {
