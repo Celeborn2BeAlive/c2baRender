@@ -15,106 +15,14 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <assimp/Importer.hpp>
-#include <assimp/ProgressHandler.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
-#include <embree2/rtcore_builder.h>
-#include <embree2/rtcore.h>
-#include <embree2/rtcore_ray.h>
-
 #include "imgui_impl_glfw_gl3.hpp"
 #include "GLProgram.hpp"
 #include "ViewController.hpp"
 
-namespace fs = std::experimental::filesystem;
+#include <c2ba/maths/types.hpp>
+#include <c2ba/scene/Scene.hpp>
 
-using Vec3f = glm::vec3;
-using Vec2f = glm::vec2;
-
-struct TriangleMesh
-{
-    struct Vertex
-    {
-        Vec3f position, normal;
-        Vec2f texCoords;
-
-        Vertex() = default;
-        Vertex(Vec3f p, Vec3f n, Vec2f t): position(p), normal(n), texCoords(t) {}
-    };
-
-    struct Triangle
-    {
-        uint32_t v0, v1, v2;
-        Triangle() = default;
-        Triangle(uint32_t v0, uint32_t v1, uint32_t v2) : v0(v0), v1(v1), v2(v2) {}
-    };
-
-    size_t m_MaterialID;
-    std::vector<Vertex> m_Vertices;
-    std::vector<Triangle> m_Triangles;
-};
-
-struct SceneGeometry
-{
-    std::vector<TriangleMesh::Vertex> m_Vertices;
-    std::vector<TriangleMesh::Triangle> m_Triangles;
-    std::vector<std::tuple<size_t, size_t, size_t>> m_Meshes; // List of pairs (offset, triangle count, vertex count)
-
-    void append(const TriangleMesh & mesh)
-    {
-        const auto offset = m_Vertices.size();
-        m_Vertices.insert(end(m_Vertices), begin(mesh.m_Vertices), end(mesh.m_Vertices));
-
-        const auto triangleOffset = m_Triangles.size();
-
-        for (const auto & triangle : mesh.m_Triangles)
-        {
-            m_Triangles.emplace_back(offset + triangle.v0, offset + triangle.v1, offset + triangle.v2);
-        }
-
-        m_Meshes.emplace_back(triangleOffset, mesh.m_Triangles.size(), mesh.m_Vertices.size());
-    }
-
-    size_t getMaterialCount()
-    {
-        return 0;
-    }
-};
-
-struct Material
-{
-    Vec3f m_DiffuseReflectance;
-
-    Material(std::string name)
-    {
-    }
-};
-
-SceneGeometry loadModel(const std::string& filepath);
-
-struct RTScene
-{
-    RTCScene m_rtcScene;
-
-    RTScene(const RTCDevice & device, const SceneGeometry & geometry): m_rtcScene { rtcDeviceNewScene(device, RTC_SCENE_STATIC, RTC_INTERSECT1) }
-    {
-        for (size_t i = 0; i < geometry.m_Meshes.size(); ++i)
-        {
-            const auto geomId = rtcNewTriangleMesh2(m_rtcScene, RTC_GEOMETRY_STATIC, std::get<1>(geometry.m_Meshes[i]), geometry.m_Vertices.size());
-            rtcSetBuffer2(m_rtcScene, geomId, RTC_VERTEX_BUFFER, geometry.m_Vertices.data(), 0, sizeof(TriangleMesh::Vertex), geometry.m_Vertices.size());
-            rtcSetBuffer2(m_rtcScene, geomId, RTC_INDEX_BUFFER, geometry.m_Triangles.data(), sizeof(TriangleMesh::Triangle) * std::get<0>(geometry.m_Meshes[i]), 
-                sizeof(TriangleMesh::Triangle), std::get<1>(geometry.m_Meshes[i]));
-        }
-        rtcCommit(m_rtcScene);
-    }
-
-    ~RTScene()
-    {
-        rtcDeleteScene(m_rtcScene);
-    }
-};
+using namespace c2ba;
 
 glm::vec3 getColor(size_t n) {
     return glm::fract(
@@ -278,15 +186,15 @@ glm::vec3 sampleHemisphereCosine(float u1, float u2)
     return glm::vec3(x, y, glm::sqrt(glm::max(0.0f, 1 - u1)));
 }
 
-void makeOrthonormals(const Vec3f &n, Vec3f &b1, Vec3f &b2)
+void makeOrthonormals(const float3 &n, float3 &b1, float3 &b2)
 {
     float sign = std::copysignf(1.0f, n.z);
     const float a = -1.0f / (sign + n.z);
     const float b = n.x * n.y * a;
-    b1 = Vec3f(1.0f + sign * n.x * n.x * a, sign * b, -sign * n.x);
-    b2 = Vec3f(b, sign + n.y * n.y * a, -n.y);
+    b1 = float3(1.0f + sign * n.x * n.x * a, sign * b, -sign * n.x);
+    b2 = float3(b, sign + n.y * n.y * a, -n.y);
 }
-Vec3f faceForward(const Vec3f & v, const Vec3f & ref)
+float3 faceForward(const float3 & v, const float3 & ref)
 {
     if (dot(v, ref) < 0.f)
         return -v;
@@ -462,7 +370,7 @@ private:
         if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
         {
             const auto Ng = faceForward(normalize(glm::vec3(ray.Ng[0], ray.Ng[1], ray.Ng[2])), -glm::vec3(ray.dir[0], ray.dir[1], ray.dir[2]));
-            Vec3f Tx, Ty;
+            float3 Tx, Ty;
             makeOrthonormals(Ng, Tx, Ty);
 
             const size_t aoRaySqrtCount = 1;
@@ -476,8 +384,8 @@ private:
                 for (size_t i = 0; i < aoRaySqrtCount; ++i)
                 {
                     const float u1 = d(g);
-                    const Vec3f localDir = sampleHemisphereCosine(u1, u2);
-                    const Vec3f worldDir = localDir.x * Tx + localDir.y * Ty + localDir.z * Ng;
+                    const float3 localDir = sampleHemisphereCosine(u1, u2);
+                    const float3 worldDir = localDir.x * Tx + localDir.y * Ty + localDir.z * Ng;
 
                     RTCRay aoRay;
                     aoRay.org[0] = ray.org[0] + ray.tfar * ray.dir[0] + 0.01 * Ng[0];
@@ -655,11 +563,11 @@ int main(int argc, char** argv)
     glGenBuffers(1, &m_SceneIBO);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_SceneVBO);
-    glBufferStorage(GL_ARRAY_BUFFER, geometry.m_Vertices.size() * sizeof(TriangleMesh::Vertex), geometry.m_Vertices.data(), 0);
+    glBufferStorage(GL_ARRAY_BUFFER, geometry.m_Vertices.size() * sizeof(SceneGeometry::Vertex), geometry.m_Vertices.data(), 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_SceneIBO);
-    glBufferStorage(GL_ARRAY_BUFFER, geometry.m_Triangles.size() * sizeof(TriangleMesh::Triangle), geometry.m_Triangles.data(), 0);
+    glBufferStorage(GL_ARRAY_BUFFER, geometry.m_Triangles.size() * sizeof(SceneGeometry::Triangle), geometry.m_Triangles.data(), 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glGenVertexArrays(1, &m_SceneVAO);
@@ -676,9 +584,9 @@ int main(int argc, char** argv)
 
     glBindBuffer(GL_ARRAY_BUFFER, m_SceneVBO); // We bind the VBO because the next 3 calls will read what VBO is bound in order to know where the data is stored
 
-    glVertexAttribPointer(positionAttrLocation, 3, GL_FLOAT, GL_FALSE, sizeof(TriangleMesh::Vertex), (const GLvoid*)offsetof(TriangleMesh::Vertex, position));
-    glVertexAttribPointer(normalAttrLocation, 3, GL_FLOAT, GL_FALSE, sizeof(TriangleMesh::Vertex), (const GLvoid*)offsetof(TriangleMesh::Vertex, normal));
-    glVertexAttribPointer(texCoordsAttrLocation, 2, GL_FLOAT, GL_FALSE, sizeof(TriangleMesh::Vertex), (const GLvoid*)offsetof(TriangleMesh::Vertex, texCoords));
+    glVertexAttribPointer(positionAttrLocation, 3, GL_FLOAT, GL_FALSE, sizeof(SceneGeometry::Vertex), (const GLvoid*)offsetof(SceneGeometry::Vertex, position));
+    glVertexAttribPointer(normalAttrLocation, 3, GL_FLOAT, GL_FALSE, sizeof(SceneGeometry::Vertex), (const GLvoid*)offsetof(SceneGeometry::Vertex, normal));
+    glVertexAttribPointer(texCoordsAttrLocation, 2, GL_FLOAT, GL_FALSE, sizeof(SceneGeometry::Vertex), (const GLvoid*)offsetof(SceneGeometry::Vertex, texCoords));
 
     glBindBuffer(GL_ARRAY_BUFFER, 0); // We can unbind the VBO because OpenGL has "written" in the VAO what VBO it needs to read when the VAO will be drawn
 
@@ -813,128 +721,3 @@ int main(int argc, char** argv)
     return 0;
 }
 
-static const aiVector3D aiZERO(0.f, 0.f, 0.f);
-
-static void loadMaterial(const aiMaterial* aimaterial, const fs::path& basePath, SceneGeometry& geometry)
-{
-    //aiColor3D color;
-
-    //aiString ainame;
-    //aimaterial->Get(AI_MATKEY_NAME, ainame);
-    //std::string name = ainame.C_Str();
-
-    //std::clog << "Load material " << name << std::endl;
-
-    //Material material(name);
-
-    //if (AI_SUCCESS == aimaterial->Get(AI_MATKEY_COLOR_DIFFUSE, color)) {
-    //    material.m_DiffuseReflectance = Vec3f(color.r, color.g, color.b);
-    //}
-
-    //aiString path;
-
-    //if (AI_SUCCESS == aimaterial->GetTexture(aiTextureType_DIFFUSE, 0, &path,
-    //    nullptr, nullptr, nullptr, nullptr, nullptr)) {
-    //    pLogger->verbose(1, "Load texture %v", (basePath + path.data));
-    //    material.m_DiffuseReflectanceTexture = loadImage(basePath + path.data, true);
-    //}
-
-    //if (AI_SUCCESS == aimaterial->Get(AI_MATKEY_COLOR_SPECULAR, color)) {
-    //    material.m_GlossyReflectance = Vec3f(color.r, color.g, color.b);
-    //}
-
-    //if (AI_SUCCESS == aimaterial->GetTexture(aiTextureType_SPECULAR, 0, &path,
-    //    nullptr, nullptr, nullptr, nullptr, nullptr)) {
-    //    pLogger->verbose(1, "Load texture %v", (basePath + path.data));
-    //    material.m_GlossyReflectanceTexture = loadImage(basePath + path.data, true);
-    //}
-
-    //aimaterial->Get(AI_MATKEY_SHININESS, material.m_Shininess);
-
-    //if (AI_SUCCESS == aimaterial->GetTexture(aiTextureType_SHININESS, 0, &path,
-    //    nullptr, nullptr, nullptr, nullptr, nullptr)) {
-    //    pLogger->verbose(1, "Load texture %v", (basePath + path.data));
-    //    material.m_ShininessTexture = loadImage(basePath + path.data, true);
-    //}
-
-    //geometry.addMaterial(std::move(material));
-}
-
-static void loadMesh(const aiMesh* aimesh, uint32_t materialOffset, SceneGeometry& geometry) {
-    TriangleMesh mesh;
-
-#ifdef _DEBUG
-    mesh.m_MaterialID = 0;
-#else
-    mesh.m_MaterialID = materialOffset + aimesh->mMaterialIndex;
-#endif
-
-    mesh.m_Vertices.reserve(aimesh->mNumVertices);
-    for (size_t vertexIdx = 0; vertexIdx < aimesh->mNumVertices; ++vertexIdx) {
-        const aiVector3D* pPosition = aimesh->HasPositions() ? &aimesh->mVertices[vertexIdx] : &aiZERO;
-        const aiVector3D* pNormal = aimesh->HasNormals() ? &aimesh->mNormals[vertexIdx] : &aiZERO;
-        const aiVector3D* pTexCoords = aimesh->HasTextureCoords(0) ? &aimesh->mTextureCoords[0][vertexIdx] : &aiZERO;
-
-        mesh.m_Vertices.emplace_back(
-            Vec3f(pPosition->x, pPosition->y, pPosition->z),
-            Vec3f(pNormal->x, pNormal->y, pNormal->z),
-            Vec2f(pTexCoords->x, pTexCoords->y));
-
-        //if (vertexIdx == 0) {
-        //    mesh.m_BBox = BBox3f(Vec3f(mesh.m_Vertices.back().position));
-        //}
-        //else {
-        //    mesh.m_BBox.grow(Vec3f(mesh.m_Vertices.back().position));
-        //}
-    }
-
-    mesh.m_Triangles.reserve(aimesh->mNumFaces);
-    for (size_t triangleIdx = 0; triangleIdx < aimesh->mNumFaces; ++triangleIdx) {
-        const aiFace& face = aimesh->mFaces[triangleIdx];
-        mesh.m_Triangles.emplace_back(face.mIndices[0], face.mIndices[1], face.mIndices[2]);
-    }
-
-    geometry.append(mesh);
-}
-
-void loadAssimpScene(const aiScene* aiscene, const std::string& filepath, SceneGeometry& geometry) {
-    auto materialOffset = geometry.getMaterialCount();
-
-    fs::path path(filepath);
-
-    //geometry.m_Materials.reserve(materialOffset + aiscene->mNumMaterials);
-    for (size_t materialIdx = 0; materialIdx < aiscene->mNumMaterials; ++materialIdx) {
-        loadMaterial(aiscene->mMaterials[materialIdx], path.parent_path(), geometry);
-    }
-
-    //geometry.m_TriangleMeshs.reserve(geometry.m_TriangleMeshs.size() + aiscene->mNumMeshes);
-    for (size_t meshIdx = 0u; meshIdx < aiscene->mNumMeshes; ++meshIdx) {
-        loadMesh(aiscene->mMeshes[meshIdx], materialOffset, geometry);
-    }
-}
-
-SceneGeometry loadModel(const std::string& filepath) {
-
-    Assimp::Importer importer;
-
-    //importer.SetExtraVerbose(true); // TODO: add logger and check for sponza
-    const aiScene* aiscene = importer.ReadFile(filepath.c_str(),
-        aiProcess_Triangulate |
-        aiProcess_GenNormals |
-        aiProcess_FlipUVs);
-    if (aiscene) {
-        std::clog << "Number of meshes = " << aiscene->mNumMeshes << std::endl;
-        try {
-            SceneGeometry geometry;
-            loadAssimpScene(aiscene, filepath, geometry);
-
-            return geometry;
-        }
-        catch (const std::runtime_error& e) {
-            throw std::runtime_error("Assimp loading error on file " + filepath + ": " + e.what());
-        }
-    }
-    else {
-        throw std::runtime_error("Assimp loading error on file " + filepath + ": " + importer.GetErrorString());
-    }
-}
