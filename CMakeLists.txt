@@ -67,13 +67,21 @@ set(
 file(
     GLOB_RECURSE
     C2BA_LIB_FILES
-    libs/c2ba/*.cpp lib/c2ba/*.hpp lib/c2ba/*.glsl
+    libs/c2ba/*.cpp
+    libs/c2ba/*.hpp
+    libs/c2ba/*.glsl
     ${THIRD_PARTY_SRC_FILES}
 )
 
 add_library(
     c2ba
     ${C2BA_LIB_FILES}
+)
+
+target_include_directories(
+    c2ba
+    PUBLIC
+    libs/c2ba/include/c2ba
 )
 
 set(
