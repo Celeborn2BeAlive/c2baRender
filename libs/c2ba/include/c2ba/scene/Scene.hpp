@@ -7,7 +7,7 @@
 #include <embree2/rtcore.h>
 #include <embree2/rtcore_ray.h>
 
-#include "../maths/types.hpp"
+#include "../maths.hpp"
 
 namespace c2ba
 {
