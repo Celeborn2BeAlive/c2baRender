@@ -65,7 +65,7 @@ static void loadMesh(const aiMesh* aimesh, uint32_t materialOffset, SceneGeometr
     std::vector<SceneGeometry::Triangle> triangles;
 
 #ifdef _DEBUG
-    mesh.m_MaterialID = 0;
+    //mesh.m_MaterialID = 0;
 #else
     const auto m_MaterialID = materialOffset + aimesh->mMaterialIndex;
 #endif

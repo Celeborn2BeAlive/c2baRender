@@ -6,7 +6,8 @@
 #include <numeric>
 #include <atomic>
 
-#include "../scene/Scene.hpp"
+#include "c2ba/scene/Scene.hpp"
+#include "c2ba/threads.hpp"
 #include "TiledFramebuffer.hpp"
 
 namespace c2ba
@@ -15,30 +16,15 @@ namespace c2ba
 class TileRenderer
 {
 public:
-    TileRenderer()
-    {
-        const auto threadCount = std::thread::hardware_concurrency() > 1u ? std::thread::hardware_concurrency() - 1u : 1u; // Try to keep one thread for the main loop
-        for (size_t threadId = 0; threadId < threadCount; ++threadId) {
-            m_ThreadPool.emplace_back([this, threadId]()
-            {
-                renderTask(threadId);
-            });
-        }
-    }
-
     ~TileRenderer()
     {
-        m_bDone = true;
-        for (auto & thread : m_ThreadPool) {
-            if (thread.joinable()) {
-                thread.join();
-            }
-        }
+        stop();
     }
 
     void setScene(const RTScene & scene)
     {
         m_Scene = &scene;
+        m_Dirty = true;
     }
 
     void setFramebuffer(size_t fbWidth, size_t fbHeight)
@@ -77,24 +63,75 @@ public:
         m_NextTile = 0;
     }
 
-    void render()
+    // Bake rendered tiled framebuffer to contiguously allocated image
+    void bake()
     {
-        if (m_Dirty) {
-            m_bRunning = false;
-            clear();
+        if (m_bStopped || m_bPaused)
+        {
+            if (m_Dirty) {
+                clear();
+            }
+            return;
         }
 
-        m_bRunning = true;
+        if (m_Dirty) {
+            pause();
+            clear();
+            start();
+        }
 
         m_Framebuffer.copy(m_Image.data());
     }
 
+    // Start the rendering if a scene has been set and the renderer is stopped or paused.
+    bool start()
+    {
+        if (!m_Scene || !(m_bStopped || m_bPaused))
+            return false;
+
+        if (m_bStopped)
+        {
+            m_bStopped = false;
+            m_bPaused = false;
+            m_ThreadCount = getHardwareConcurrency() > 1u ? getHardwareConcurrency() - 1u : 1u; // Try to keep one thread for the main loop
+            m_RenderTaskFuture = asyncParallelRun(m_ThreadCount, [this](size_t threadId) { renderTask(threadId); });
+        }
+        else if (m_bPaused)
+        {
+            m_bPaused = false;
+            m_PausedThreadCount = 0;
+            m_UnpauseCondition.notify_all();
+        }
+
+        return true;
+    }
+
+    // All threads wait for the next call to start() to resume rendering.
+    // The method waits for all threads to be in the waiting state
+    void pause()
+    {
+        if (m_bPaused || m_bStopped)
+            return;
+
+        m_PausedThreadCount = 0;
+        m_bPaused = true;
+        while (m_PausedThreadCount != m_ThreadCount) // Wait for all threads to increment the counter
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        }
+    }
+
+    // All threads exit their rendering function.
+    // The method waits for them.
     void stop()
     {
-        m_bDone = true;
-        for (auto & t : m_ThreadPool) {
-            t.join();
-        }
+        m_bStopped = true;
+        m_bPaused = false;
+        m_PausedThreadCount = 0;
+        m_UnpauseCondition.notify_all();
+
+        m_RenderTaskFuture.wait();
+        m_ThreadCount = 0;
     }
 
     const float4 * getPixels() const
@@ -103,8 +140,8 @@ public:
     }
 
 private:
-    bool m_bRunning = false;
-    bool m_bDone = false;
+    bool m_bPaused = false;
+    bool m_bStopped = true;
 
     static const size_t s_TileSize = 16;
     TiledFramebuffer m_Framebuffer;
@@ -235,15 +272,17 @@ private:
         std::mt19937 g{ (unsigned int)threadId };
         std::uniform_real_distribution<float> d;
 
-        while (!m_bDone)
+        while (!m_bStopped)
         {
-            while (!m_bRunning && !m_bDone) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(256));
-            }
-            if (m_bDone) {
-                break;
+            if (m_bPaused && !m_bStopped) {
+                ++m_PausedThreadCount;
+                std::unique_lock<std::mutex> l{ m_UnpauseMutex };
+                m_UnpauseCondition.wait(l, [this]() { return !(m_bPaused && !m_bStopped); });
             }
 
+            if (m_bStopped) {
+                break;
+            }
             const auto tileId = m_TilePermutation[m_NextTile++ % m_Framebuffer.tileCount()];
             const auto l = m_Framebuffer.lockTile(tileId);
 
@@ -265,7 +304,7 @@ private:
                 }
             }
 
-            if (m_bDone) {
+            if (m_bStopped) {
                 break;
             }
         }
@@ -275,7 +314,6 @@ private:
 
     std::vector<size_t> m_TilePermutation;
 
-    std::vector<std::thread> m_ThreadPool;
     std::vector<float4> m_Image;
 
     const RTScene * m_Scene = nullptr;
@@ -284,6 +322,13 @@ private:
     float4x4 m_RcpViewMatrix; // Cam to World
 
     std::atomic_uint32_t m_NextTile{ 0 };
+    std::future<void> m_RenderTaskFuture;
+
+    uint32_t m_ThreadCount{ 0 };
+    std::atomic_uint32_t m_PausedThreadCount{ 0 };
+
+    std::mutex m_UnpauseMutex;
+    std::condition_variable m_UnpauseCondition;
 };
 
 }

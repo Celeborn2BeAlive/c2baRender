@@ -22,37 +22,13 @@
 #include <c2ba/scene/Scene.hpp>
 #include <c2ba/rendering/TileRenderer.hpp>
 #include <c2ba/maths.hpp>
+#include <c2ba/utils.hpp>
 
 using namespace c2ba;
 
 void rtcErrorCallback(void* userPtr, const RTCError code, const char * str)
 {
     std::cerr << "Embree error: " << str << std::endl;
-}
-
-template<typename DeleteFunc>
-struct RAII
-{
-    DeleteFunc m_DelF;
-    RAII(DeleteFunc delF) : m_DelF(std::move(delF))
-    {
-    }
-
-    ~RAII()
-    {
-        m_DelF();
-    }
-
-    RAII(const RAII &) = delete;
-    RAII & operator =(const RAII &) = delete;
-    RAII(RAII &&) = default;
-    RAII & operator =(RAII &&) = default;
-};
-
-template<typename DeleteFunc>
-RAII<DeleteFunc> finally(DeleteFunc && delF)
-{
-    return RAII<DeleteFunc>(delF);
 }
 
 int main(int argc, char** argv)
@@ -188,6 +164,8 @@ int main(int argc, char** argv)
 
     renderer.setScene(scene);
 
+    renderer.start();
+
     bool cameraMoved = true;
 
     for (auto iterationCount = 0u; !glfwWindowShouldClose(m_pWindow); ++iterationCount)
@@ -218,7 +196,7 @@ int main(int argc, char** argv)
 
         if (!cameraMoved)
         {
-            renderer.render();
+            renderer.bake();
 
             glDisable(GL_DEPTH_TEST);
             m_drawQuadProgram.use();
@@ -240,6 +218,22 @@ int main(int argc, char** argv)
         {
             ImGui::Begin("Params");
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
+            if (ImGui::Button("Start Renderer"))
+            {
+                std::cerr << int(renderer.start()) << std::endl;
+            }
+
+            if (ImGui::Button("Pause Renderer"))
+            {
+                renderer.pause();
+            }
+
+            if (ImGui::Button("Stop Renderer"))
+            {
+                renderer.stop();
+            }
+
             ImGui::End();
         }
 
