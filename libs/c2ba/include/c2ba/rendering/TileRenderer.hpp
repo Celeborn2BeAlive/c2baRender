@@ -9,6 +9,8 @@
 #include "c2ba/scene/Scene.hpp"
 #include "c2ba/threads.hpp"
 #include "TiledFramebuffer.hpp"
+#include "integrators/Integrator.hpp"
+#include "integrators/AOIntegrator.hpp"
 
 namespace c2ba
 {
@@ -24,6 +26,7 @@ public:
     void setScene(const RTScene & scene)
     {
         m_Scene = &scene;
+        m_Integrator->setScene(scene);
         m_Dirty = true;
     }
 
@@ -35,23 +38,29 @@ public:
         m_TilePermutation.resize(m_Framebuffer.tileCount());
         std::iota(begin(m_TilePermutation), end(m_TilePermutation), 0u);
 
+        m_TileSampleCount.resize(m_Framebuffer.tileCount());
+        std::fill(begin(m_TileSampleCount), end(m_TileSampleCount), 0);
+
         std::random_device rd;
         std::mt19937 g{ rd() };
 
         std::shuffle(begin(m_TilePermutation), end(m_TilePermutation), g);
 
+        m_Integrator->setFramebufferSize(fbWidth, fbHeight);
         m_Dirty = true;
     }
 
     void setProjMatrix(const float4x4 & projMatrix)
     {
         m_RcpProjMatrix = inverse(projMatrix);
+        m_Integrator->setProjMatrix(projMatrix);
         m_Dirty = true;
     }
 
     void setViewMatrix(const float4x4 & viewMatrix)
     {
         m_RcpViewMatrix = inverse(viewMatrix);
+        m_Integrator->setViewMatrix(viewMatrix);
         m_Dirty = true;
     }
 
@@ -186,87 +195,6 @@ private:
             *pixelPtr += float4(float3(0), 1);
     }
 
-    void renderAO(const float2 & rasterPos, float4 * pixelPtr, std::mt19937 & g, const std::uniform_real_distribution<float> & d)
-    {
-        const float2 ndcPos = float2(-1) + 2.f * float2(rasterPos / float2(m_Framebuffer.imageWidth(), m_Framebuffer.imageHeight()));
-
-        float4 viewSpacePos = m_RcpProjMatrix * float4(ndcPos, -1.f, 1.f);
-        viewSpacePos /= viewSpacePos.w;
-
-        float4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
-        worldSpacePos /= worldSpacePos.w;
-
-        RTCRay ray;
-        ray.org[0] = m_RcpViewMatrix[3][0];
-        ray.org[1] = m_RcpViewMatrix[3][1];
-        ray.org[2] = m_RcpViewMatrix[3][2];
-
-        ray.dir[0] = worldSpacePos[0] - ray.org[0];
-        ray.dir[1] = worldSpacePos[1] - ray.org[1];
-        ray.dir[2] = worldSpacePos[2] - ray.org[2];
-
-        ray.tnear = 0.f;
-        ray.tfar = std::numeric_limits<float>::infinity();
-        ray.instID = RTC_INVALID_GEOMETRY_ID;
-        ray.geomID = RTC_INVALID_GEOMETRY_ID;
-        ray.primID = RTC_INVALID_GEOMETRY_ID;
-        ray.mask = 0xFFFFFFFF;
-        ray.time = 0.0f;
-
-        rtcIntersect(m_Scene->m_rtcScene, ray);
-
-        if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
-        {
-            const auto Ng = faceForward(normalize(float3(ray.Ng[0], ray.Ng[1], ray.Ng[2])), -float3(ray.dir[0], ray.dir[1], ray.dir[2]));
-            float3 Tx, Ty;
-            makeOrthonormals(Ng, Tx, Ty);
-
-            const size_t aoRaySqrtCount = 1;
-            const size_t aoRayCount = aoRaySqrtCount * aoRaySqrtCount;
-            const float delta = 1.f / aoRayCount;
-
-            float visibility = 0.f;
-            for (size_t j = 0; j < aoRaySqrtCount; ++j)
-            {
-                const float u2 = d(g);
-                for (size_t i = 0; i < aoRaySqrtCount; ++i)
-                {
-                    const float u1 = d(g);
-                    const float3 localDir = sampleHemisphereCosine(u1, u2);
-                    const float3 worldDir = localDir.x * Tx + localDir.y * Ty + localDir.z * Ng;
-
-                    RTCRay aoRay;
-                    aoRay.org[0] = ray.org[0] + ray.tfar * ray.dir[0] + 0.01 * Ng[0];
-                    aoRay.org[1] = ray.org[1] + ray.tfar * ray.dir[1] + 0.01 * Ng[1];
-                    aoRay.org[2] = ray.org[2] + ray.tfar * ray.dir[2] + 0.01 * Ng[2];
-
-                    aoRay.dir[0] = worldDir[0];
-                    aoRay.dir[1] = worldDir[1];
-                    aoRay.dir[2] = worldDir[2];
-
-                    aoRay.tnear = 0.f;
-                    aoRay.tfar = 100.f;
-                    aoRay.instID = RTC_INVALID_GEOMETRY_ID;
-                    aoRay.geomID = RTC_INVALID_GEOMETRY_ID;
-                    aoRay.primID = RTC_INVALID_GEOMETRY_ID;
-                    aoRay.mask = 0xFFFFFFFF;
-                    aoRay.time = 0.0f;
-
-                    rtcIntersect(m_Scene->m_rtcScene, aoRay);
-
-                    if (aoRay.geomID == RTC_INVALID_GEOMETRY_ID)
-                        visibility += 1.f;
-                }
-            }
-            visibility *= delta;
-
-            *pixelPtr += float4(float3(visibility), 1);
-
-        }
-        else
-            *pixelPtr += float4(float3(0), 1);
-    }
-
     void renderTask(size_t threadId)
     {
         std::mt19937 g{ (unsigned int)threadId };
@@ -289,20 +217,8 @@ private:
             const auto bounds = m_Framebuffer.tileBounds(tileId);
             float4 * tilePtr = m_Framebuffer.tileDataPtr(tileId);
 
-            for (size_t pixelY = 0; pixelY < bounds.countY; ++pixelY)
-            {
-                for (size_t pixelX = 0; pixelX < bounds.countX; ++pixelX)
-                {
-                    const size_t pixelId = pixelX + pixelY * s_TileSize;
-
-                    const float2 rasterPos = float2(bounds.beginX + pixelX + 0.5f, bounds.beginY + pixelY + 0.5f);
-                    const float2 ndcPos = float2(-1) + 2.f * float2(rasterPos / float2(m_Framebuffer.imageWidth(), m_Framebuffer.imageHeight()));
-
-                    //renderRasterPos(rasterPos, tilePtr + pixelId);
-                    //renderNg(rasterPos, tilePtr + pixelId);
-                    renderAO(rasterPos, tilePtr + pixelId, g, d);
-                }
-            }
+            m_Integrator->render(m_TileSampleCount[tileId], 1, bounds.beginX, bounds.beginY, bounds.countX, bounds.countY, tilePtr);
+            ++m_TileSampleCount[tileId];
 
             if (m_bStopped) {
                 break;
@@ -313,6 +229,7 @@ private:
     bool m_Dirty = true;
 
     std::vector<size_t> m_TilePermutation;
+    std::vector<size_t> m_TileSampleCount;
 
     std::vector<float4> m_Image;
 
@@ -329,6 +246,8 @@ private:
 
     std::mutex m_UnpauseMutex;
     std::condition_variable m_UnpauseCondition;
+
+    std::unique_ptr<Integrator> m_Integrator = std::make_unique<AOIntegrator>();
 };
 
 }
