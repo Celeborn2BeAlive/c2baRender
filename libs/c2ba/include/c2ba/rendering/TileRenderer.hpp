@@ -11,6 +11,7 @@
 #include "TiledFramebuffer.hpp"
 #include "integrators/Integrator.hpp"
 #include "integrators/AOIntegrator.hpp"
+#include "integrators/GeometryIntegrator.hpp"
 
 namespace c2ba
 {
@@ -25,7 +26,6 @@ public:
 
     void setScene(const RTScene & scene)
     {
-        m_Scene = &scene;
         m_Integrator->setScene(scene);
         m_Dirty = true;
     }
@@ -52,14 +52,12 @@ public:
 
     void setProjMatrix(const float4x4 & projMatrix)
     {
-        m_RcpProjMatrix = inverse(projMatrix);
         m_Integrator->setProjMatrix(projMatrix);
         m_Dirty = true;
     }
 
     void setViewMatrix(const float4x4 & viewMatrix)
     {
-        m_RcpViewMatrix = inverse(viewMatrix);
         m_Integrator->setViewMatrix(viewMatrix);
         m_Dirty = true;
     }
@@ -95,7 +93,7 @@ public:
     // Start the rendering if a scene has been set and the renderer is stopped or paused.
     bool start()
     {
-        if (!m_Scene || !(m_bStopped || m_bPaused))
+        if (!m_bStopped && !m_bPaused)
             return false;
 
         if (m_bStopped)
@@ -149,52 +147,6 @@ public:
     }
 
 private:
-    bool m_bPaused = false;
-    bool m_bStopped = true;
-
-    static const size_t s_TileSize = 16;
-    TiledFramebuffer m_Framebuffer;
-
-    void renderRasterPos(const float2 & rasterPos, float4 * pixelPtr)
-    {
-        *pixelPtr += float4(float2(rasterPos / float2(m_Framebuffer.imageWidth(), m_Framebuffer.imageHeight())), 0.f, 1.f);
-    }
-
-    void renderNg(const float2 & rasterPos, float4 * pixelPtr)
-    {
-        const float2 ndcPos = float2(-1) + 2.f * float2(rasterPos / float2(m_Framebuffer.imageWidth(), m_Framebuffer.imageHeight()));
-
-        float4 viewSpacePos = m_RcpProjMatrix * float4(ndcPos, -1.f, 1.f);
-        viewSpacePos /= viewSpacePos.w;
-
-        float4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
-        worldSpacePos /= worldSpacePos.w;
-
-        RTCRay ray;
-        ray.org[0] = m_RcpViewMatrix[3][0];
-        ray.org[1] = m_RcpViewMatrix[3][1];
-        ray.org[2] = m_RcpViewMatrix[3][2];
-
-        ray.dir[0] = worldSpacePos[0] - ray.org[0];
-        ray.dir[1] = worldSpacePos[1] - ray.org[1];
-        ray.dir[2] = worldSpacePos[2] - ray.org[2];
-
-        ray.tnear = 0.f;
-        ray.tfar = std::numeric_limits<float>::infinity();
-        ray.instID = RTC_INVALID_GEOMETRY_ID;
-        ray.geomID = RTC_INVALID_GEOMETRY_ID;
-        ray.primID = RTC_INVALID_GEOMETRY_ID;
-        ray.mask = 0xFFFFFFFF;
-        ray.time = 0.0f;
-
-        rtcIntersect(m_Scene->m_rtcScene, ray);
-
-        if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
-            *pixelPtr += float4(glm::abs(float3(ray.Ng[0], ray.Ng[1], ray.Ng[2])), 1);
-        else
-            *pixelPtr += float4(float3(0), 1);
-    }
-
     void renderTask(size_t threadId)
     {
         std::mt19937 g{ (unsigned int)threadId };
@@ -226,17 +178,17 @@ private:
         }
     }
 
+    bool m_bPaused = false;
+    bool m_bStopped = true;
     bool m_Dirty = true;
+
+    static const size_t s_TileSize = 16;
+    TiledFramebuffer m_Framebuffer;
 
     std::vector<size_t> m_TilePermutation;
     std::vector<size_t> m_TileSampleCount;
 
     std::vector<float4> m_Image;
-
-    const RTScene * m_Scene = nullptr;
-
-    float4x4 m_RcpProjMatrix; // Screen to Cam
-    float4x4 m_RcpViewMatrix; // Cam to World
 
     std::atomic_uint32_t m_NextTile{ 0 };
     std::future<void> m_RenderTaskFuture;
