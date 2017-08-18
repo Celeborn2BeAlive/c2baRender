@@ -3,20 +3,25 @@
 namespace c2ba
 {
 
-void AOIntegrator::render(size_t sampleId, size_t sampleCount, size_t startX, size_t startY, size_t countX, size_t countY, float4 * outBuffer) const
+void AOIntegrator::doPreprocess()
 {
-    std::mt19937 g{ uint32_t(startX + startY * m_nFramebufferWidth + sampleId * m_nFramebufferWidth * m_nFramebufferHeight) };
+    m_RandomGenerators.resize(m_nTileCount);
+    for (size_t tileId = 0; tileId < m_nTileCount; ++tileId) {
+        m_RandomGenerators[tileId].seed(tileId * 1024u);
+    }
+}
+
+void AOIntegrator::doRender(const RenderTileParams & params) const
+{
     std::uniform_real_distribution<float> d{ 0, 1 };
 
-    for (size_t pixelY = 0; pixelY < countY; ++pixelY)
+    for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
-        for (size_t pixelX = 0; pixelX < countX; ++pixelX)
+        for (size_t pixelX = 0; pixelX < params.countX; ++pixelX)
         {
-            const size_t pixelId = pixelX + pixelY * countX;
-
-            const float2 rasterPos = float2(startX + pixelX + 0.5f, startY + pixelY + 0.5f);
-
-            renderAO(rasterPos, outBuffer + pixelId, g, d);
+            const size_t pixelId = pixelX + pixelY * params.countX;
+            const float2 rasterPos = float2(params.beginX + pixelX + 0.5f, params.beginY + pixelY + 0.5f);
+            renderAO(rasterPos, params.outBuffer + pixelId, m_RandomGenerators[params.tileId], d);
         }
     }
 }

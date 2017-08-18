@@ -3,17 +3,15 @@
 namespace c2ba
 {
 
-void GeometryIntegrator::render(size_t sampleId, size_t sampleCount, size_t startX, size_t startY, size_t countX, size_t countY, float4 * outBuffer) const
+void GeometryIntegrator::doRender(const RenderTileParams & params) const
 {
-    for (size_t pixelY = 0; pixelY < countY; ++pixelY)
+    for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
-        for (size_t pixelX = 0; pixelX < countX; ++pixelX)
+        for (size_t pixelX = 0; pixelX < params.countX; ++pixelX)
         {
-            const size_t pixelId = pixelX + pixelY * countX;
-
-            const float2 rasterPos = float2(startX + pixelX + 0.5f, startY + pixelY + 0.5f);
-
-            renderNg(rasterPos, outBuffer + pixelId);
+            const size_t pixelId = pixelX + pixelY * params.countX;
+            const float2 rasterPos = float2(params.beginX + pixelX + 0.5f, params.beginY + pixelY + 0.5f);
+            renderNg(rasterPos, params.outBuffer + pixelId);
         }
     }
 }

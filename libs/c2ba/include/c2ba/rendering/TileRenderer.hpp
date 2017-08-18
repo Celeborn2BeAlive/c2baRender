@@ -26,7 +26,7 @@ public:
 
     void setScene(const RTScene & scene)
     {
-        m_Integrator->setScene(scene);
+        m_Integrator->setScene(scene); // Not really good, we must stop render threads before changing the scene
         m_Dirty = true;
     }
 
@@ -84,6 +84,10 @@ public:
         if (m_Dirty) {
             pause();
             clear();
+
+            m_Integrator->setTileSize(s_TileSize);
+            m_Integrator->preprocess();
+
             start();
         }
 
@@ -101,6 +105,10 @@ public:
             m_bStopped = false;
             m_bPaused = false;
             m_ThreadCount = getHardwareConcurrency() > 1u ? getHardwareConcurrency() - 1u : 1u; // Try to keep one thread for the main loop
+
+            m_Integrator->setTileSize(s_TileSize);
+            m_Integrator->preprocess();
+
             m_RenderTaskFuture = asyncParallelRun(m_ThreadCount, [this](size_t threadId) { renderTask(threadId); });
         }
         else if (m_bPaused)
@@ -149,9 +157,6 @@ public:
 private:
     void renderTask(size_t threadId)
     {
-        std::mt19937 g{ (unsigned int)threadId };
-        std::uniform_real_distribution<float> d;
-
         while (!m_bStopped)
         {
             if (m_bPaused && !m_bStopped) {
@@ -169,7 +174,17 @@ private:
             const auto bounds = m_Framebuffer.tileBounds(tileId);
             float4 * tilePtr = m_Framebuffer.tileDataPtr(tileId);
 
-            m_Integrator->render(m_TileSampleCount[tileId], 1, bounds.beginX, bounds.beginY, bounds.countX, bounds.countY, tilePtr);
+            Integrator::RenderTileParams params = {};
+            params.tileId = tileId;
+            params.startSample = m_TileSampleCount[tileId];
+            params.sampleCount = 1;
+            params.beginX = bounds.beginX;
+            params.beginY = bounds.beginY;
+            params.countX = bounds.countX;
+            params.countY = bounds.countY;
+            params.outBuffer = tilePtr;
+
+            m_Integrator->render(params);
             ++m_TileSampleCount[tileId];
 
             if (m_bStopped) {
