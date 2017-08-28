@@ -26,6 +26,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 include(c2ba-glsl-shaders)
 include(c2ba-copy-dll-post-build)
+include(c2ba-group-sources)
 
 if(MSVC)
     set(SHADER_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin/\$\(Configuration\)/shaders)
@@ -72,6 +73,9 @@ file(
     libs/c2ba/*.glsl
     ${THIRD_PARTY_SRC_FILES}
 )
+
+c2ba_group_sources(${CMAKE_CURRENT_SOURCE_DIR}/libs/c2ba/include/c2ba c2ba)
+c2ba_group_sources(${CMAKE_CURRENT_SOURCE_DIR}/libs/c2ba/src c2ba)
 
 add_library(
     c2ba
@@ -123,7 +127,6 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     set(LIBRARIES ${LIBRARIES} stdc++fs)
 endif()
 
-source_group ("glsl" REGULAR_EXPRESSION "*/*.glsl")
 source_group ("third-party" REGULAR_EXPRESSION "third-party/*.*")
 
 file(GLOB APP_DIRECTORIES "apps/*")
@@ -135,6 +138,8 @@ foreach(DIR ${APP_DIRECTORIES})
         SRC_FILES
         apps/${APP}/*.cpp apps/${APP}/*.hpp apps/${APP}/*.glsl apps/${APP}/
     )
+
+    c2ba_group_sources(${CMAKE_CURRENT_SOURCE_DIR}/apps/${APP} ${APP})
 
     add_executable(
         ${APP}
