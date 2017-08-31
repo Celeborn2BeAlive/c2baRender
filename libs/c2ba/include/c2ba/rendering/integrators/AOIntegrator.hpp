@@ -14,16 +14,20 @@ class AOIntegrator : public Integrator
 
     void doRender(const RenderTileParams & params) override;
 
-    void renderSingleRayAPI(const RenderTileParams & params);
+    void renderNormalSingleRayAPI(const RenderTileParams & params);
 
-    void renderStreamRayAPI(const RenderTileParams & params);
+    void renderStreamSingleRayAPI(const RenderTileParams & params);
 
-    void renderAO(const float2 & rasterPos, float4 * pixelPtr, std::mt19937 & g, const std::uniform_real_distribution<float> & d) const;
+    void renderStreamSOARayAPI(const RenderTileParams & params);
 
     std::vector<std::mt19937> m_RandomGenerators;
     std::vector<RTCRay> m_Rays;
 
-    size_t m_AORaySqrtCount = 4;
+    static const size_t m_AORaySqrtCount = 4;
+    static const size_t m_AORayCount = m_AORaySqrtCount * m_AORaySqrtCount;
+
+    using AORayPacket = RTCRayNt<m_AORayCount>;
+    std::vector<AORayPacket> m_AORayPackets;
 };
 
 }
