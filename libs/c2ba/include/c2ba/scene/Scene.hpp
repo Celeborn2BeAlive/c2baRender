@@ -55,12 +55,11 @@ struct SceneGeometry
     }
 };
 
-
 struct RTScene
 {
     RTCScene m_rtcScene;
 
-    RTScene(const RTCDevice & device, const SceneGeometry & geometry) : m_rtcScene{ rtcDeviceNewScene(device, RTC_SCENE_STATIC, RTC_INTERSECT1) }
+    RTScene(const RTCDevice & device, const SceneGeometry & geometry) : m_rtcScene{ rtcDeviceNewScene(device, RTC_SCENE_STATIC, RTC_INTERSECT1 | RTC_INTERSECT_STREAM) }
     {
         for (size_t i = 0; i < geometry.m_Meshes.size(); ++i)
         {
@@ -80,4 +79,12 @@ struct RTScene
 
 SceneGeometry loadModel(const std::string& filepath);
 
+class Scene
+{
+public:
+
+private:
+    SceneGeometry m_Geometry;
+    RTScene m_Accel;
+};
 }

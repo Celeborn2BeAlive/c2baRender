@@ -3,7 +3,7 @@
 namespace c2ba
 {
 
-void GeometryIntegrator::doRender(const RenderTileParams & params) const
+void GeometryIntegrator::doRender(const RenderTileParams & params)
 {
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {

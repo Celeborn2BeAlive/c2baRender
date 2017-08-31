@@ -9,7 +9,7 @@ namespace c2ba
 class Integrator
 {
 public:
-    virtual ~Integrator() {}
+    virtual ~Integrator() = default;
 
     void setScene(const RTScene & scene)
     {
@@ -37,8 +37,14 @@ public:
         m_nTileSize = size;
     }
 
+    void setThreadCount(size_t count)
+    {
+        m_nThreadCount = count;
+    }
+
     struct RenderTileParams
     {
+        size_t threadId;
         size_t tileId;
         size_t startSample;
         size_t sampleCount;
@@ -59,7 +65,7 @@ public:
     }
 
     // Render pixels of a tile. This method should not be called by multiple threads at the same time for a given tile.
-    void render(const RenderTileParams & params) const
+    void render(const RenderTileParams & params)
     {
         doRender(params);
     }
@@ -67,7 +73,7 @@ public:
 private:
     virtual void doPreprocess() {}
 
-    virtual void doRender(const RenderTileParams & params) const = 0;
+    virtual void doRender(const RenderTileParams & params) = 0;
 
 protected:
     const RTScene * m_Scene = nullptr;
@@ -83,6 +89,8 @@ protected:
     size_t m_nTileCountX = 0;
     size_t m_nTileCountY = 0;
     size_t m_nTileCount;
+
+    size_t m_nThreadCount;
 };
 
 }

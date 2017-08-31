@@ -86,6 +86,7 @@ public:
             clear();
 
             m_Integrator->setTileSize(s_TileSize);
+            m_Integrator->setThreadCount(m_ThreadCount);
             m_Integrator->preprocess();
 
             start();
@@ -107,6 +108,7 @@ public:
             m_ThreadCount = getHardwareConcurrency() > 1u ? getHardwareConcurrency() - 1u : 1u; // Try to keep one thread for the main loop
 
             m_Integrator->setTileSize(s_TileSize);
+            m_Integrator->setThreadCount(m_ThreadCount);
             m_Integrator->preprocess();
 
             m_RenderTaskFuture = asyncParallelRun(m_ThreadCount, [this](size_t threadId) { renderTask(threadId); });
@@ -175,6 +177,7 @@ private:
             float4 * tilePtr = m_Framebuffer.tileDataPtr(tileId);
 
             Integrator::RenderTileParams params = {};
+            params.threadId = threadId;
             params.tileId = tileId;
             params.startSample = m_TileSampleCount[tileId];
             params.sampleCount = 1;
