@@ -11,14 +11,14 @@ void AOIntegrator::doPreprocess()
     }
 
     m_Rays.resize((m_AORaySqrtCount * m_AORaySqrtCount * m_nTileSize * m_nTileSize + m_nTileSize * m_nTileSize) * m_nThreadCount, RTCRay{});
-    m_AORayPackets.resize(m_nTileSize * m_nTileSize, AORayPacket{});
+    m_AORayPackets.resize(m_nTileSize * m_nTileSize * m_nThreadCount, AORayPacket{});
 }
 
 void AOIntegrator::doRender(const RenderTileParams & params)
 {
-    //renderSingleRayAPI(params);
+    renderNormalSingleRayAPI(params);
     //renderStreamSingleRayAPI(params);
-    renderStreamSOARayAPI(params);
+    //renderStreamSOARayAPI(params);
 }
 
 void AOIntegrator::renderNormalSingleRayAPI(const RenderTileParams & params)
@@ -265,6 +265,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
     const float delta = 1.f / aoRayCount;
 
     RTCRay * rays = m_Rays.data() + params.threadId * (m_nTileSize * m_nTileSize + m_nTileSize * m_nTileSize * aoRayCount);
+    AORayPacket * aoRays = m_AORayPackets.data() + params.threadId * m_nTileSize * m_nTileSize;
 
     std::uniform_real_distribution<float> d{ 0, 1 };
 
@@ -318,7 +319,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
             const size_t pixelId = pixelX + pixelY * params.countX;
 
             RTCRay & ray = rays[pixelId];
-            AORayPacket & aoRays = m_AORayPackets[pixelId];
+            AORayPacket & aoRayPacket = aoRays[pixelId];
 
             if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
             {
@@ -337,21 +338,21 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
                         const float3 localDir = sampleHemisphereCosine(u1, u2);
                         const float3 worldDir = localDir.x * Tx + localDir.y * Ty + localDir.z * Ng;
 
-                        aoRays.orgx[aoRayIdx] = ray.org[0] + ray.tfar * ray.dir[0] + 0.01 * Ng[0];
-                        aoRays.orgy[aoRayIdx] = ray.org[1] + ray.tfar * ray.dir[1] + 0.01 * Ng[1];
-                        aoRays.orgz[aoRayIdx] = ray.org[2] + ray.tfar * ray.dir[2] + 0.01 * Ng[2];
+                        aoRayPacket.orgx[aoRayIdx] = ray.org[0] + ray.tfar * ray.dir[0] + 0.01 * Ng[0];
+                        aoRayPacket.orgy[aoRayIdx] = ray.org[1] + ray.tfar * ray.dir[1] + 0.01 * Ng[1];
+                        aoRayPacket.orgz[aoRayIdx] = ray.org[2] + ray.tfar * ray.dir[2] + 0.01 * Ng[2];
 
-                        aoRays.dirx[aoRayIdx] = worldDir[0];
-                        aoRays.diry[aoRayIdx] = worldDir[1];
-                        aoRays.dirz[aoRayIdx] = worldDir[2];
+                        aoRayPacket.dirx[aoRayIdx] = worldDir[0];
+                        aoRayPacket.diry[aoRayIdx] = worldDir[1];
+                        aoRayPacket.dirz[aoRayIdx] = worldDir[2];
 
-                        aoRays.tnear[aoRayIdx] = 0.f;
-                        aoRays.tfar[aoRayIdx] = 100.f;
-                        aoRays.instID[aoRayIdx] = RTC_INVALID_GEOMETRY_ID;
-                        aoRays.geomID[aoRayIdx] = RTC_INVALID_GEOMETRY_ID;
-                        aoRays.primID[aoRayIdx] = RTC_INVALID_GEOMETRY_ID;
-                        aoRays.mask[aoRayIdx] = 0xFFFFFFFF;
-                        aoRays.time[aoRayIdx] = 0.0f;
+                        aoRayPacket.tnear[aoRayIdx] = 0.f;
+                        aoRayPacket.tfar[aoRayIdx] = 100.f;
+                        aoRayPacket.instID[aoRayIdx] = RTC_INVALID_GEOMETRY_ID;
+                        aoRayPacket.geomID[aoRayIdx] = RTC_INVALID_GEOMETRY_ID;
+                        aoRayPacket.primID[aoRayIdx] = RTC_INVALID_GEOMETRY_ID;
+                        aoRayPacket.mask[aoRayIdx] = 0xFFFFFFFF;
+                        aoRayPacket.time[aoRayIdx] = 0.0f;
                     }
                 }
             }
@@ -363,16 +364,34 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
                     {
                         auto aoRayIdx = i + j * m_AORaySqrtCount;
 
-                        aoRays.tnear[aoRayIdx] = 1.f;
-                        aoRays.tfar[aoRayIdx] = 0.f;
+                        aoRayPacket.tnear[aoRayIdx] = 1.f;
+                        aoRayPacket.tfar[aoRayIdx] = 0.f;
                     }
                 }
             }
         }
     }
 
-    rtcIntersectNM(m_Scene->m_rtcScene, &context, (RTCRayN *)m_AORayPackets.data(), aoRayCount, params.countX * params.countY, sizeof(AORayPacket));
+    // With normal ray mode:
+    //int32_t valid[m_AORayCount];
+    //std::fill(valid, valid + m_AORayCount, 0xFFFFFFFF);
 
+    //for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
+    //{
+    //    for (size_t pixelX = 0; pixelX < params.countX; ++pixelX)
+    //    {
+    //        const size_t pixelId = pixelX + pixelY * params.countX;
+    //        RTCRay & ray = rays[pixelId];
+    //        AORayPacket & aoRayPacket = aoRays[pixelId];
+
+    //        if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
+    //            rtcIntersect4(valid, m_Scene->m_rtcScene, aoRayPacket);
+    //    }
+    //}
+
+    // With stream ray mode:
+    rtcOccludedNM(m_Scene->m_rtcScene, &context, aoRays, m_AORayCount, params.countX * params.countY, sizeof(AORayPacket));
+    
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
         for (size_t pixelX = 0; pixelX < params.countX; ++pixelX)
@@ -380,7 +399,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
             const size_t pixelId = pixelX + pixelY * params.countX;
 
             const RTCRay & ray = rays[pixelId];
-            AORayPacket & aoRays = m_AORayPackets[pixelId];
+            AORayPacket & aoRayPacket = aoRays[pixelId];
 
             float visibility = 0.f;
 
@@ -391,7 +410,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
                     for (size_t i = 0; i < m_AORaySqrtCount; ++i)
                     {
                         auto aoRayIdx = i + j * m_AORaySqrtCount;
-                        if (aoRays.geomID[aoRayIdx] == RTC_INVALID_GEOMETRY_ID)
+                        if (aoRayPacket.geomID[aoRayIdx])
                             visibility += 1.f;
                     }
                 }

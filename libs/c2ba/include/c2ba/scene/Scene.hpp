@@ -59,7 +59,8 @@ struct RTScene
 {
     RTCScene m_rtcScene;
 
-    RTScene(const RTCDevice & device, const SceneGeometry & geometry) : m_rtcScene{ rtcDeviceNewScene(device, RTC_SCENE_STATIC, RTC_INTERSECT1 | RTC_INTERSECT_STREAM) }
+    RTScene(const RTCDevice & device, const SceneGeometry & geometry) : m_rtcScene{ rtcDeviceNewScene(device, 
+        RTC_SCENE_STATIC, RTC_INTERSECT1 | RTC_INTERSECT4 | RTC_INTERSECT8 | RTC_INTERSECT16 | RTC_INTERSECT_STREAM) }
     {
         for (size_t i = 0; i < geometry.m_Meshes.size(); ++i)
         {
