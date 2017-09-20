@@ -11,7 +11,7 @@ class Integrator
 public:
     virtual ~Integrator() = default;
 
-    void setScene(const RTScene & scene)
+    void setScene(const Scene & scene)
     {
         m_Scene = &scene;
     }
@@ -76,7 +76,7 @@ private:
     virtual void doRender(const RenderTileParams & params) = 0;
 
 protected:
-    const RTScene * m_Scene = nullptr;
+    const Scene * m_Scene = nullptr;
 
     float4x4 m_RcpProjMatrix; // Screen to Cam
     float4x4 m_RcpViewMatrix; // Cam to World

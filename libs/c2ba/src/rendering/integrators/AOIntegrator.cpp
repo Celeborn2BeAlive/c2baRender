@@ -35,36 +35,19 @@ void AOIntegrator::renderNormalSingleRayAPI(const RenderTileParams & params)
 
             const float2 ndcPos = float2(-1) + 2.f * float2(rasterPos / float2(m_nFramebufferWidth, m_nFramebufferHeight));
 
-            float4 viewSpacePos = m_RcpProjMatrix * float4(ndcPos, -1.f, 1.f);
-            viewSpacePos /= viewSpacePos.w;
+            const auto viewSpacePos = divideW<float4>(m_RcpProjMatrix * float4(ndcPos, -1.f, 1.f));
+            const auto worldSpacePos = divideW<float3>(m_RcpViewMatrix * viewSpacePos);
+            const auto viewOrigin = float3(m_RcpViewMatrix[3]);
 
-            float4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
-            worldSpacePos /= worldSpacePos.w;
-
-            RTCRay ray;
-            ray.org[0] = m_RcpViewMatrix[3][0];
-            ray.org[1] = m_RcpViewMatrix[3][1];
-            ray.org[2] = m_RcpViewMatrix[3][2];
-
-            ray.dir[0] = worldSpacePos[0] - ray.org[0];
-            ray.dir[1] = worldSpacePos[1] - ray.org[1];
-            ray.dir[2] = worldSpacePos[2] - ray.org[2];
-
-            ray.tnear = 0.f;
-            ray.tfar = std::numeric_limits<float>::infinity();
-            ray.instID = RTC_INVALID_GEOMETRY_ID;
-            ray.geomID = RTC_INVALID_GEOMETRY_ID;
-            ray.primID = RTC_INVALID_GEOMETRY_ID;
-            ray.mask = 0xFFFFFFFF;
-            ray.time = 0.0f;
-
-            rtcIntersect(m_Scene->m_rtcScene, ray);
-
-            if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
+            Ray ray{ viewOrigin, worldSpacePos - viewOrigin };
+            
+            if (m_Scene->intersect(ray))
             {
-                const auto Ng = faceForward(normalize(float3(ray.Ng[0], ray.Ng[1], ray.Ng[2])), -float3(ray.dir[0], ray.dir[1], ray.dir[2]));
+                float3 N;
+                m_Scene->evalHitPoint(ray, Normal(N));
+
                 float3 Tx, Ty;
-                makeOrthonormals(Ng, Tx, Ty);
+                makeOrthonormals(N, Tx, Ty);
 
                 const size_t aoRayCount = m_AORaySqrtCount * m_AORaySqrtCount;
                 const float delta = 1.f / aoRayCount;
@@ -77,28 +60,10 @@ void AOIntegrator::renderNormalSingleRayAPI(const RenderTileParams & params)
                         const float u2 = d(g);
                         const float u1 = d(g);
                         const float3 localDir = sampleHemisphereCosine(u1, u2);
-                        const float3 worldDir = localDir.x * Tx + localDir.y * Ty + localDir.z * Ng;
+                        const float3 worldDir = localDir.x * Tx + localDir.y * Ty + localDir.z * N;
 
-                        RTCRay aoRay;
-                        aoRay.org[0] = ray.org[0] + ray.tfar * ray.dir[0] + 0.01 * Ng[0];
-                        aoRay.org[1] = ray.org[1] + ray.tfar * ray.dir[1] + 0.01 * Ng[1];
-                        aoRay.org[2] = ray.org[2] + ray.tfar * ray.dir[2] + 0.01 * Ng[2];
-
-                        aoRay.dir[0] = worldDir[0];
-                        aoRay.dir[1] = worldDir[1];
-                        aoRay.dir[2] = worldDir[2];
-
-                        aoRay.tnear = 0.f;
-                        aoRay.tfar = 100.f;
-                        aoRay.instID = RTC_INVALID_GEOMETRY_ID;
-                        aoRay.geomID = RTC_INVALID_GEOMETRY_ID;
-                        aoRay.primID = RTC_INVALID_GEOMETRY_ID;
-                        aoRay.mask = 0xFFFFFFFF;
-                        aoRay.time = 0.0f;
-
-                        rtcIntersect(m_Scene->m_rtcScene, aoRay);
-
-                        if (aoRay.geomID == RTC_INVALID_GEOMETRY_ID)
+                        Ray aoRay{ hitPoint(ray), worldDir, 0.01f, 100.f };
+                        if (!m_Scene->intersect(aoRay))
                             visibility += 1.f;
                     }
                 }
@@ -163,7 +128,7 @@ void AOIntegrator::renderStreamSingleRayAPI(const RenderTileParams & params)
     context.flags = RTC_INTERSECT_COHERENT;
     context.userRayExt = nullptr;
 
-    rtcIntersectNM(m_Scene->m_rtcScene, &context, (RTCRayN *)rays, 1, params.countX * params.countY, sizeof(RTCRay));
+    rtcIntersectNM(m_Scene->rtcScene(), &context, (RTCRayN *)rays, 1, params.countX * params.countY, sizeof(RTCRay));
 
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
@@ -224,7 +189,7 @@ void AOIntegrator::renderStreamSingleRayAPI(const RenderTileParams & params)
         }
     }
 
-    rtcIntersectNM(m_Scene->m_rtcScene, &context, (RTCRayN *)(rays + m_nTileSize * m_nTileSize), 1, aoRayCount * params.countX * params.countY, sizeof(RTCRay));
+    rtcIntersectNM(m_Scene->rtcScene(), &context, (RTCRayN *)(rays + m_nTileSize * m_nTileSize), 1, aoRayCount * params.countX * params.countY, sizeof(RTCRay));
 
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
@@ -310,7 +275,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
     context.flags = RTC_INTERSECT_COHERENT;
     context.userRayExt = nullptr;
 
-    rtcIntersectNM(m_Scene->m_rtcScene, &context, (RTCRayN *)rays, 1, params.countX * params.countY, sizeof(RTCRay));
+    rtcIntersectNM(m_Scene->rtcScene(), &context, (RTCRayN *)rays, 1, params.countX * params.countY, sizeof(RTCRay));
 
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
@@ -390,7 +355,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
     //}
 
     // With stream ray mode:
-    rtcOccludedNM(m_Scene->m_rtcScene, &context, aoRays, m_AORayCount, params.countX * params.countY, sizeof(AORayPacket));
+    rtcOccludedNM(m_Scene->rtcScene(), &context, aoRays, m_AORayCount, params.countX * params.countY, sizeof(AORayPacket));
     
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
@@ -410,7 +375,7 @@ void AOIntegrator::renderStreamSOARayAPI(const RenderTileParams & params)
                     for (size_t i = 0; i < m_AORaySqrtCount; ++i)
                     {
                         auto aoRayIdx = i + j * m_AORaySqrtCount;
-                        if (aoRayPacket.geomID[aoRayIdx])
+                        if (aoRayPacket.geomID[aoRayIdx]) // geomID != 0 => not occluded
                             visibility += 1.f;
                     }
                 }

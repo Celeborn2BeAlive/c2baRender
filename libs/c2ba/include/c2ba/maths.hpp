@@ -50,6 +50,9 @@ inline float3 sampleHemisphereCosine(float u1, float u2)
     return float3(x, y, sqrt(max(0.0f, 1 - u1)));
 }
 
+// Ref: "Building an Orthonormal Basis, Revisited" http://jcgt.org/published/0006/01/01/
+// function branchlessONB() in paper
+// #todo: Implement "Improved Accuracy when Building an Orthonormal Basis" http://jcgt.org/published/0006/01/02/
 inline void makeOrthonormals(const float3 &n, float3 &b1, float3 &b2)
 {
     float sign = std::copysignf(1.0f, n.z);
@@ -63,6 +66,12 @@ inline float3 faceForward(const float3 & v, const float3 & ref)
     if (dot(v, ref) < 0.f)
         return -v;
     return v;
+}
+
+template<typename OutType>
+inline OutType divideW(const float4 & v)
+{
+    return v.w == 0.f ? OutType(v) : OutType(v) / v.w;
 }
 
 }

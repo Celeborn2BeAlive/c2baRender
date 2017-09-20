@@ -24,7 +24,7 @@ public:
         stop();
     }
 
-    void setScene(const RTScene & scene)
+    void setScene(const Scene & scene)
     {
         m_Integrator->setScene(scene); // Not really good, we must stop render threads before changing the scene
         m_Dirty = true;

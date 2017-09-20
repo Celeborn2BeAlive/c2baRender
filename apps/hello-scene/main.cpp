@@ -26,11 +26,6 @@
 
 using namespace c2ba;
 
-void rtcErrorCallback(void* userPtr, const RTCError code, const char * str)
-{
-    std::cerr << "Embree error: " << str << std::endl;
-}
-
 int main(int argc, char** argv)
 {
     const auto m_AppPath = fs::path{ argv[0] };
@@ -44,13 +39,8 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    SceneGeometry geometry = loadModel(argv[1]);
-
-    const RTCDevice embreeDevice = rtcNewDevice();
-    const auto embreeDeviceDel = finally([embreeDevice]() { rtcDeleteDevice(embreeDevice); });
-    rtcDeviceSetErrorFunction2(embreeDevice, rtcErrorCallback, nullptr);
-
-    RTScene scene(embreeDevice, geometry);
+    Scene scene(loadModel(argv[1]));
+    const auto & geometry = scene.geometry();
 
     if (!glfwInit()) {
         std::cerr << "Unable to init GLFW.\n";

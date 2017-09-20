@@ -1,5 +1,7 @@
 #pragma once
 
+#include <random>
+
 #include "Integrator.hpp"
 
 namespace c2ba
@@ -7,9 +9,11 @@ namespace c2ba
 
 class GeometryIntegrator : public Integrator
 {
+    void doPreprocess() override;
+
     void doRender(const RenderTileParams & params) override;
 
-    void renderNg(const float2 & rasterPos, float4 * pixelPtr) const;
+    std::vector<std::mt19937> m_RandomGenerators;
 };
 
 }

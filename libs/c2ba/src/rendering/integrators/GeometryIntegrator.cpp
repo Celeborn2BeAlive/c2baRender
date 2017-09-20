@@ -3,52 +3,47 @@
 namespace c2ba
 {
 
+void GeometryIntegrator::doPreprocess()
+{
+    m_RandomGenerators.resize(m_nTileCount);
+    for (size_t tileId = 0; tileId < m_nTileCount; ++tileId) {
+        m_RandomGenerators[tileId].seed(tileId * 1024u);
+    }
+}
+
 void GeometryIntegrator::doRender(const RenderTileParams & params)
 {
+    std::uniform_real_distribution<float> d{ 0, 1 };
+    auto & g = m_RandomGenerators[params.tileId];
+
     for (size_t pixelY = 0; pixelY < params.countY; ++pixelY)
     {
         for (size_t pixelX = 0; pixelX < params.countX; ++pixelX)
         {
             const size_t pixelId = pixelX + pixelY * params.countX;
-            const float2 rasterPos = float2(params.beginX + pixelX + 0.5f, params.beginY + pixelY + 0.5f);
-            renderNg(rasterPos, params.outBuffer + pixelId);
+            float4 * pixelPtr = params.outBuffer + pixelId;
+
+            const auto rasterPos = float2(params.beginX + pixelX + d(g), params.beginY + pixelY + d(g));
+            const auto ndcPos = float2(-1) + 2.f * float2(rasterPos / float2(m_nFramebufferWidth, m_nFramebufferHeight));
+            const auto viewSpacePos = divideW<float4>(m_RcpProjMatrix * float4(ndcPos, -1.f, 1.f));
+            const auto worldSpacePos = divideW<float3>(m_RcpViewMatrix * viewSpacePos);
+            const auto viewOrigin = float3(m_RcpViewMatrix[3]);
+
+            Ray ray{ viewOrigin, worldSpacePos - viewOrigin };
+
+            if (m_Scene->intersect(ray))
+            {
+                float3 value;
+                Facing facing;
+                m_Scene->evalHitPoint(ray, Normal(value), TriangleFacing(facing));
+
+                *pixelPtr += float4(facing == Facing::Back ? float3(0, 1, 0) : float3(1, 0, 1), 1);
+            }
+            else {
+                *pixelPtr += float4(float3(0), 1);
+            }
         }
     }
-}
-
-void GeometryIntegrator::renderNg(const float2 & rasterPos, float4 * pixelPtr) const
-{
-    const float2 ndcPos = float2(-1) + 2.f * float2(rasterPos / float2(m_nFramebufferWidth, m_nFramebufferHeight));
-
-    float4 viewSpacePos = m_RcpProjMatrix * float4(ndcPos, -1.f, 1.f);
-    viewSpacePos /= viewSpacePos.w;
-
-    float4 worldSpacePos = m_RcpViewMatrix * viewSpacePos;
-    worldSpacePos /= worldSpacePos.w;
-
-    RTCRay ray;
-    ray.org[0] = m_RcpViewMatrix[3][0];
-    ray.org[1] = m_RcpViewMatrix[3][1];
-    ray.org[2] = m_RcpViewMatrix[3][2];
-
-    ray.dir[0] = worldSpacePos[0] - ray.org[0];
-    ray.dir[1] = worldSpacePos[1] - ray.org[1];
-    ray.dir[2] = worldSpacePos[2] - ray.org[2];
-
-    ray.tnear = 0.f;
-    ray.tfar = std::numeric_limits<float>::infinity();
-    ray.instID = RTC_INVALID_GEOMETRY_ID;
-    ray.geomID = RTC_INVALID_GEOMETRY_ID;
-    ray.primID = RTC_INVALID_GEOMETRY_ID;
-    ray.mask = 0xFFFFFFFF;
-    ray.time = 0.0f;
-
-    rtcIntersect(m_Scene->m_rtcScene, ray);
-
-    if (ray.geomID != RTC_INVALID_GEOMETRY_ID)
-        *pixelPtr += float4(glm::abs(float3(ray.Ng[0], ray.Ng[1], ray.Ng[2])), 1);
-    else
-        *pixelPtr += float4(float3(0), 1);
 }
 
 }

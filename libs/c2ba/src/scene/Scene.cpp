@@ -140,4 +140,46 @@ SceneGeometry loadModel(const std::string& filepath) {
     }
 }
 
+namespace
+{
+
+void rtcErrorCallback(void* userPtr, const RTCError code, const char * str)
+{
+    std::cerr << "Embree error: " << str << std::endl;
+}
+
+}
+
+struct RTCDeviceHandler
+{
+    const RTCDevice m_rtcDevice = rtcNewDevice();
+
+    RTCDeviceHandler()
+    {
+        rtcDeviceSetErrorFunction2(m_rtcDevice, rtcErrorCallback, nullptr);
+    }
+
+    ~RTCDeviceHandler()
+    {
+        rtcDeleteDevice(m_rtcDevice);
+    }
+    
+};
+
+const RTCDevice & getRTCDevice()
+{
+    static RTCDeviceHandler handler;
+    return handler.m_rtcDevice;
+}
+
+Ray::Ray(const float3 & org, const float3 & dir, float tnear, float tfar, float time, uint32_t mask):
+    org(org),
+    dir(dir),
+    tnear(tnear),
+    tfar(tfar),
+    time(time),
+    mask(mask)
+{
+}
+
 }
