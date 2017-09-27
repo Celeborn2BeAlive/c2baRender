@@ -30,6 +30,7 @@ public:
     {
         m_nFramebufferWidth = width;
         m_nFramebufferHeight = height;
+        m_RcpFramebufferSize = float2(1.f) / float2(width, height);
     }
 
     void setTileSize(size_t size)
@@ -83,6 +84,7 @@ protected:
 
     size_t m_nFramebufferWidth = 0;
     size_t m_nFramebufferHeight = 0;
+    float2 m_RcpFramebufferSize;
 
     size_t m_nTileSize = 0;
 
@@ -92,5 +94,22 @@ protected:
 
     size_t m_nThreadCount;
 };
+
+inline size_t pixelCount(const Integrator::RenderTileParams & params)
+{
+    return params.countX * params.countY;
+}
+
+template<typename Vec2T = size2>
+inline Vec2T pixelTileCoords(size_t pixelId, const Integrator::RenderTileParams & params)
+{
+    return Vec2T(pixelId % params.countX, pixelId / params.countX);
+}
+
+template<typename Vec2T = size2>
+inline Vec2T pixelImageCoords(size_t pixelId, const Integrator::RenderTileParams & params)
+{
+    return Vec2T(params.beginX, params.beginY) + pixelTileCoords<Vec2T>(pixelId, params);
+}
 
 }

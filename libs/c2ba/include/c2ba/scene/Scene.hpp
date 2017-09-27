@@ -35,9 +35,9 @@ struct alignas(RTCRay) Ray
     float u;
     float v;
 
-    uint32_t geomID = RTC_INVALID_GEOMETRY_ID;
-    uint32_t primID = RTC_INVALID_GEOMETRY_ID;
-    uint32_t instID = RTC_INVALID_GEOMETRY_ID;
+    uint32_t geomID = InvalidID;
+    uint32_t primID = InvalidID;
+    uint32_t instID = InvalidID;
 
     Ray() = default;
 
@@ -49,6 +49,44 @@ struct alignas(RTCRay) Ray
 inline float3 hitPoint(const Ray & ray)
 {
     return ray.org + ray.tfar * ray.dir;
+}
+
+template<size_t N>
+using RaySOA = RTCRayNt<N>;
+
+using RaySOAPtrs = RTCRayNp;
+
+template<size_t N>
+RaySOAPtrs raySOAPtrs(RaySOA<N> & rays)
+{
+    RaySOAPtrs ptrs;
+
+    ptrs.orgx = rays.orgx;
+    ptrs.orgy = rays.orgy;
+    ptrs.orgz = rays.orgz;
+    ptrs.dirx = rays.dirx;
+    ptrs.diry = rays.diry;
+    ptrs.dirz = rays.dirz;
+    ptrs.tnear = rays.tnear;
+    ptrs.tfar = rays.tfar;
+    ptrs.time = rays.time;
+    ptrs.mask = rays.mask;
+    ptrs.Ngx = rays.Ngx;
+    ptrs.Ngy = rays.Ngy;
+    ptrs.Ngz = rays.Ngz;
+    ptrs.geomID = rays.geomID;
+    ptrs.instID = rays.instID;
+    ptrs.primID = rays.primID;
+
+    return ptrs;
+}
+
+inline void advance(RaySOAPtrs & ptrs, size_t stride)
+{
+    const size_t byteSize = sizeof(RaySOAPtrs);
+    const size_t ptrCount = byteSize / sizeof(void*);
+    for (size_t i = 0; i < ptrCount; ++i)
+        ((char**)(&ptrs))[i] += stride;
 }
 
 struct SceneGeometry
@@ -206,6 +244,12 @@ struct TriangleFacing : public HitPointAttribute<Facing>
     }
 };
 
+enum class RayProperties
+{
+    Coherent = RTC_INTERSECT_COHERENT,
+    Incoherent = RTC_INTERSECT_INCOHERENT
+};
+
 class Scene
 {
 public:
@@ -226,14 +270,41 @@ public:
         return ray.geomID == 0; // If some geometry got found along the ray segment, the geometry ID (geomID) will get set to 0 http://embree.github.io/api.html
     }
 
+    void intersect(Ray * rays, size_t count, RayProperties properties) const
+    {
+        RTCIntersectContext context;
+        context.flags = RTCIntersectFlags(properties);
+        context.userRayExt = nullptr;
+        rtcIntersectNM(m_Accel.m_rtcScene, &context, (RTCRayN*)rays, 1, count, sizeof(Ray));
+    }
+
+    void occluded(Ray * rays, size_t count, RayProperties properties) const
+    {
+        RTCIntersectContext context;
+        context.flags = RTCIntersectFlags(properties);
+        context.userRayExt = nullptr;
+        rtcOccludedNM(m_Accel.m_rtcScene, &context, (RTCRayN*)rays, 1, count, sizeof(Ray));
+    }
+
+    void intersect(RaySOAPtrs & rays, size_t count, RayProperties properties) const
+    {
+        RTCIntersectContext context;
+        context.flags = RTCIntersectFlags(properties);
+        context.userRayExt = nullptr;
+        rtcIntersectNp(m_Accel.m_rtcScene, &context, rays, count);
+    }
+
+    void occluded(RaySOAPtrs & rays, size_t count, RayProperties properties) const
+    {
+        RTCIntersectContext context;
+        context.flags = RTCIntersectFlags(properties);
+        context.userRayExt = nullptr;
+        rtcOccludedNp(m_Accel.m_rtcScene, &context, rays, count);
+    }
+
     const SceneGeometry & geometry() const
     {
         return m_Geometry;
-    }
-
-    [[deprecated("Will be removed after definition of the stream API inside the Scene class")]] const RTCScene & rtcScene() const
-    {
-        return m_Accel.m_rtcScene;
     }
 
     template<typename... HitPointAttributes>

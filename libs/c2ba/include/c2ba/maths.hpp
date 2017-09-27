@@ -15,6 +15,10 @@ using float4 = glm::vec4;
 
 using float4x4 = glm::mat4;
 
+using size2 = glm::tvec2<size_t>;
+using size3 = glm::tvec3<size_t>;
+using size4 = glm::tvec4<size_t>;
+
 // numeric functions
 
 using glm::abs;
