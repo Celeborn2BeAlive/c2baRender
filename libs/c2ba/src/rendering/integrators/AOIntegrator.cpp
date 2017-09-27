@@ -195,12 +195,14 @@ void AOIntegrator::renderStreamRaySOAAPI(const RenderTileParams & params)
         }
     }
 
-    RaySOAPtrs aoSOAPtrs = raySOAPtrs(aoRays[0]);
-    for (size_t pixelId = 0, count = pixelCount(params); pixelId < count; ++pixelId)
-    {
-        m_Scene->occluded(aoSOAPtrs, aoRayCount, RayProperties::Coherent);
-        advance(aoSOAPtrs, sizeof(AORayPacket));
-    }
+    m_Scene->occluded(&aoRays[0], pixelCount(params), RayProperties::Coherent);
+
+    //RaySOAPtrs aoSOAPtrs = raySOAPtrs(aoRays[0]);
+    //for (size_t pixelId = 0, count = pixelCount(params); pixelId < count; ++pixelId)
+    //{
+    //    m_Scene->occluded(aoSOAPtrs, aoRayCount, RayProperties::Coherent);
+    //    advance(aoSOAPtrs, sizeof(AORayPacket));
+    //}
 
     for (size_t pixelId = 0, count = pixelCount(params); pixelId < count; ++pixelId)
     {

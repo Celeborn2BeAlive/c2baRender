@@ -286,6 +286,24 @@ public:
         rtcOccludedNM(m_Accel.m_rtcScene, &context, (RTCRayN*)rays, 1, count, sizeof(Ray));
     }
 
+    template<size_t RayCount>
+    void intersect(RaySOA<RayCount> * rayPackets, size_t packetCount, RayProperties properties) const
+    {
+        RTCIntersectContext context;
+        context.flags = RTCIntersectFlags(properties);
+        context.userRayExt = nullptr;
+        rtcIntersectNM(m_Accel.m_rtcScene, &context, (RTCRayN*)rayPackets, RayCount, packetCount, sizeof(RaySOA<RayCount>));
+    }
+
+    template<size_t RayCount>
+    void occluded(RaySOA<RayCount> * rayPackets, size_t packetCount, RayProperties properties) const
+    {
+        RTCIntersectContext context;
+        context.flags = RTCIntersectFlags(properties);
+        context.userRayExt = nullptr;
+        rtcOccludedNM(m_Accel.m_rtcScene, &context, (RTCRayN*)rayPackets, RayCount, packetCount, sizeof(RaySOA<RayCount>));
+    }
+
     void intersect(RaySOAPtrs & rays, size_t count, RayProperties properties) const
     {
         RTCIntersectContext context;
